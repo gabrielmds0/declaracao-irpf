@@ -546,7 +546,6 @@ async function gerarDeclaracao(dadosAluno) {
         // Em produção (Vercel): usa @sparticuz/chromium
         // Local (Windows/Mac): usa Chrome/Chromium instalado
         console.log('[PDF] Iniciando Puppeteer...');
-        const fs = require('fs');
         const localChromes = [
             'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
             'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
@@ -555,14 +554,24 @@ async function gerarDeclaracao(dadosAluno) {
             '/usr/bin/chromium-browser',
         ];
         const localChrome = localChromes.find(p => fs.existsSync(p));
-        const executablePath = localChrome || await chromium.executablePath();
-        const launchArgs = localChrome
-            ? ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
-            : chromium.args;
+
+        let executablePath, launchArgs, launchViewport;
+        if (localChrome) {
+            executablePath = localChrome;
+            launchArgs = ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'];
+            launchViewport = null;
+        } else {
+            // Vercel / serverless — @sparticuz/chromium v133+
+            chromium.setHeadlessMode = true;
+            chromium.setGraphicsMode = false;
+            executablePath = await chromium.executablePath();
+            launchArgs = chromium.args;
+            launchViewport = chromium.defaultViewport;
+        }
 
         browser = await puppeteer.launch({
             args: launchArgs,
-            defaultViewport: localChrome ? null : chromium.defaultViewport,
+            defaultViewport: launchViewport,
             executablePath,
             headless: true,
         });
