@@ -592,7 +592,7 @@ async function gerarDeclaracao(dadosAluno) {
             success: true,
             tipo: 'declaracao',
             buffer: pdfBuffer,
-            nomeArquivo: `Declaracao_IRPF_${dadosAluno.nome.replace(/\s+/g, '_')}_${Date.now()}.pdf`,
+            nomeArquivo: `Declaracao_IRPF_${dadosAluno.nome.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, '_')}_${Date.now()}.pdf`,
             totalParcelas: dadosFinanceiros.length,
             valorTotal: formatarMoeda(valorTotal),
             mensagem: 'Declaração PDF gerada com sucesso!'
