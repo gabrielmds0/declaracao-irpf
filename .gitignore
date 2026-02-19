@@ -1,0 +1,31 @@
+# Dependências
+node_modules/
+package-lock.json
+
+# Vercel
+.vercel/
+
+# Credenciais
+.env
+.env.local
+*.json.bak
+*service-account*.json
+data/*.json
+
+# PDFs gerados (testes locais)
+*.pdf
+
+# Logs
+*.log
+npm-debug.log*
+
+# Sistema
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/
+
+# Claude Code
+.claude/

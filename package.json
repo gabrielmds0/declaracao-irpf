@@ -1,0 +1,31 @@
+{
+  "name": "declaracao-irpf-api",
+  "version": "2.0.0",
+  "description": "API para geração de declarações IRPF com Google Sheets - Liberdade Médica",
+  "main": "api/declaracao.js",
+  "scripts": {
+    "dev": "node server.js",
+    "deploy": "vercel --prod"
+  },
+  "dependencies": {
+    "@sparticuz/chromium": "^123.0.0",
+    "google-auth-library": "^9.4.1",
+    "google-spreadsheet": "^4.1.1",
+    "puppeteer-core": "^22.0.0"
+  },
+  "engines": {
+    "node": ">=18.x"
+  },
+  "keywords": [
+    "irpf",
+    "declaracao",
+    "google-sheets",
+    "vercel",
+    "serverless"
+  ],
+  "author": "Liberdade Médica",
+  "license": "PROPRIETARY",
+  "devDependencies": {
+    "dotenv": "^17.3.1"
+  }
+}
