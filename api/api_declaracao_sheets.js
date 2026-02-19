@@ -59,8 +59,9 @@ function obterMesPorExtenso(numeroMes) {
 }
 
 function verificarTurma(turma) {
-    const turmaUpper = String(turma).toUpperCase();
-    return turmaUpper === 'T1' || turmaUpper === 'T2';
+    const turmaUpper = String(turma).toUpperCase().trim();
+    // Aceita: T1, T2, 1, 2
+    return turmaUpper === 'T1' || turmaUpper === 'T2' || turmaUpper === '1' || turmaUpper === '2';
 }
 
 // ==================== TEMPLATE HTML ====================
