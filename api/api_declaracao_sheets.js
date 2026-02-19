@@ -681,8 +681,10 @@ module.exports = async (req, res) => {
 
                 res.setHeader('Content-Type', 'application/pdf');
                 res.setHeader('Content-Disposition', `attachment; filename="${resultado.nomeArquivo}"`);
-                console.log('[Response] Enviando PDF:', resultado.nomeArquivo);
-                return res.status(200).send(resultado.buffer);
+                res.setHeader('Content-Length', resultado.buffer.length);
+                console.log('[Response] Enviando PDF:', resultado.nomeArquivo, `(${resultado.buffer.length} bytes)`);
+                res.statusCode = 200;
+                return res.end(resultado.buffer);
             } else {
                 console.log('[Response] Retorno:', resultado);
                 return res.status(resultado.success ? 200 : 400).json(resultado);
