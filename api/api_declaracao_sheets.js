@@ -621,15 +621,58 @@ module.exports = async (req, res) => {
         return res.status(200).end();
     }
 
-    // GET - Health check
+    // GET - Health check OU geração de PDF via query params (para Blip)
     if (req.method === 'GET') {
-        return res.status(200).json({
-            status: 'online',
-            service: 'API Declaração IRPF - Google Sheets + PDF',
-            version: '3.0.0',
-            timestamp: new Date().toISOString(),
-            googleSheets: SPREADSHEET_ID ? 'configurado' : 'não configurado'
-        });
+        const { nome, cpf, turma, email } = req.query || {};
+
+        // Se não tiver cpf/nome/turma → health check
+        if (!cpf && !nome) {
+            return res.status(200).json({
+                status: 'online',
+                service: 'API Declaração IRPF - Google Sheets + PDF',
+                version: '3.0.0',
+                timestamp: new Date().toISOString(),
+                googleSheets: SPREADSHEET_ID ? 'configurado' : 'não configurado'
+            });
+        }
+
+        // Com parâmetros → gera PDF (usado pelo Blip como URI do documento)
+        if (!nome || !cpf || !turma) {
+            return res.status(400).json({
+                success: false,
+                erro: 'Campos obrigatórios: nome, cpf, turma'
+            });
+        }
+
+        try {
+            console.log('\n========================================');
+            console.log('[Request GET] Blip/URL solicitação:', {
+                nome,
+                cpf: cpf.replace(/\d(?=\d{4})/g, '*'),
+                turma,
+                timestamp: new Date().toISOString()
+            });
+            console.log('========================================\n');
+
+            const resultado = await gerarDeclaracao({ nome, cpf, email, turma });
+
+            if (resultado.success && resultado.tipo === 'declaracao') {
+                res.setHeader('Content-Type', 'application/pdf');
+                res.setHeader('Content-Disposition', `attachment; filename="${resultado.nomeArquivo}"`);
+                res.setHeader('Content-Length', resultado.buffer.length);
+                res.statusCode = 200;
+                return res.end(resultado.buffer);
+            } else {
+                return res.status(resultado.success ? 200 : 400).json(resultado);
+            }
+        } catch (error) {
+            console.error('[Erro Fatal GET]', error);
+            return res.status(500).json({
+                success: false,
+                erro: 'Erro interno do servidor',
+                detalhes: error.message
+            });
+        }
     }
 
     // POST - Gerar declaração
