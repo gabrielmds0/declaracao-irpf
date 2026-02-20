@@ -36,6 +36,8 @@ const GMAIL_USER = process.env.GMAIL_USER;
 const GMAIL_CLIENT_ID = process.env.GMAIL_CLIENT_ID;
 const GMAIL_CLIENT_SECRET = process.env.GMAIL_CLIENT_SECRET;
 const GMAIL_REFRESH_TOKEN = process.env.GMAIL_REFRESH_TOKEN;
+// Se TEST_EMAIL estiver definido, todos os emails vão para esse endereço (modo teste)
+const TEST_EMAIL = process.env.TEST_EMAIL;
 
 // ==================== ENVIO DE EMAIL ====================
 
@@ -43,6 +45,12 @@ async function enviarEmailComPDF({ emailDestinatario, nomeAluno, pdfBuffer, nome
     if (!GMAIL_USER || !GMAIL_CLIENT_ID || !GMAIL_CLIENT_SECRET || !GMAIL_REFRESH_TOKEN) {
         console.warn('[Email] Credenciais OAuth2 do Gmail não configuradas — email não enviado');
         return { enviado: false, motivo: 'Credenciais de email não configuradas' };
+    }
+
+    // Modo teste: redireciona para TEST_EMAIL em vez do aluno real
+    const destinatarioFinal = TEST_EMAIL || emailDestinatario;
+    if (TEST_EMAIL) {
+        console.log(`[Email] MODO TESTE — redirecionando de ${emailDestinatario} para ${TEST_EMAIL}`);
     }
 
     const transporter = nodemailer.createTransport({
@@ -58,7 +66,7 @@ async function enviarEmailComPDF({ emailDestinatario, nomeAluno, pdfBuffer, nome
 
     const mailOptions = {
         from: `"Liberdade Médica" <${GMAIL_USER}>`,
-        to: emailDestinatario,
+        to: destinatarioFinal,
         subject: 'Declaração de Pagamentos para o IRPF 2025 — Liberdade Médica',
         html: `
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
