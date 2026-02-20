@@ -33,21 +33,26 @@ const GOOGLE_SERVICE_ACCOUNT_EMAIL = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
 const GOOGLE_PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n');
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 const GMAIL_USER = process.env.GMAIL_USER;
-const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD;
+const GMAIL_CLIENT_ID = process.env.GMAIL_CLIENT_ID;
+const GMAIL_CLIENT_SECRET = process.env.GMAIL_CLIENT_SECRET;
+const GMAIL_REFRESH_TOKEN = process.env.GMAIL_REFRESH_TOKEN;
 
 // ==================== ENVIO DE EMAIL ====================
 
 async function enviarEmailComPDF({ emailDestinatario, nomeAluno, pdfBuffer, nomeArquivo, totalParcelas, valorTotal }) {
-    if (!GMAIL_USER || !GMAIL_APP_PASSWORD) {
-        console.warn('[Email] GMAIL_USER ou GMAIL_APP_PASSWORD não configurados — email não enviado');
+    if (!GMAIL_USER || !GMAIL_CLIENT_ID || !GMAIL_CLIENT_SECRET || !GMAIL_REFRESH_TOKEN) {
+        console.warn('[Email] Credenciais OAuth2 do Gmail não configuradas — email não enviado');
         return { enviado: false, motivo: 'Credenciais de email não configuradas' };
     }
 
     const transporter = nodemailer.createTransport({
         service: 'gmail',
         auth: {
+            type: 'OAuth2',
             user: GMAIL_USER,
-            pass: GMAIL_APP_PASSWORD
+            clientId: GMAIL_CLIENT_ID,
+            clientSecret: GMAIL_CLIENT_SECRET,
+            refreshToken: GMAIL_REFRESH_TOKEN
         }
     });
 
