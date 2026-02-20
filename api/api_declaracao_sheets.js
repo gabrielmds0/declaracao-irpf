@@ -394,54 +394,52 @@ function parsearValor(valorStr) {
     return parseFloat(String(valorStr).replace(/[R$\s.]/g, '').replace(',', '.')) || 0;
 }
 
-async function buscarDadosFinanceiros(cpf = null, nome = null, email = null) {
+// Retorna { turma, dadosFinanceiros } em uma única chamada ao Sheets.
+// A turma vem da primeira linha do aluno (sem filtros), os dados financeiros
+// são filtrados por ano=2025 e status=PAGO.
+async function buscarDadosAluno(cpf = null, nome = null, email = null) {
     try {
         const doc = await conectarGoogleSheets();
-        // Aba BASE (GID 972200278) — contém os dados financeiros dos alunos
         const sheet = doc.sheetsById[972200278];
         await sheet.loadHeaderRow();
-        const colunaNome = sheet.headerValues[0]; // primeira coluna = nome do aluno
+        const colunaNome = sheet.headerValues[0];
         const rows = await sheet.getRows();
 
         console.log(`[Google Sheets] Aba: ${sheet.title} | Total de linhas: ${rows.length}`);
 
-        let dadosFiltrados = rows;
-
+        // 1. Filtrar pelo aluno (sem filtro de ano/status)
+        let rowsAluno = rows;
         if (cpf) {
             const cpfLimpo = String(cpf).replace(/\D/g, '');
-            dadosFiltrados = dadosFiltrados.filter(row => {
-                const cpfRow = String(row.get('CPF') || '').replace(/\D/g, '');
-                return cpfRow === cpfLimpo;
-            });
+            rowsAluno = rows.filter(row =>
+                String(row.get('CPF') || '').replace(/\D/g, '') === cpfLimpo
+            );
         } else if (nome) {
-            dadosFiltrados = dadosFiltrados.filter(row => {
-                const nomeRow = String(row.get(colunaNome) || '').toLowerCase();
-                return nomeRow.includes(nome.toLowerCase());
-            });
+            rowsAluno = rows.filter(row =>
+                String(row.get(colunaNome) || '').toLowerCase().includes(nome.toLowerCase())
+            );
         } else if (email) {
-            dadosFiltrados = dadosFiltrados.filter(row => {
-                const emailRow = String(row.get('EMAIL') || '').toLowerCase();
-                return emailRow === email.toLowerCase();
-            });
+            rowsAluno = rows.filter(row =>
+                String(row.get('EMAIL') || '').toLowerCase() === email.toLowerCase()
+            );
         }
 
-        console.log(`[Filtro Aluno] Linhas após filtrar aluno: ${dadosFiltrados.length}`);
+        console.log(`[Filtro Aluno] Linhas encontradas: ${rowsAluno.length}`);
 
-        dadosFiltrados = dadosFiltrados.filter(row => {
-            const { ano } = parsearMesAno(row.get('MêS PARCELA'));
-            return ano === 2025;
-        });
+        if (rowsAluno.length === 0) return { turma: null, dadosFinanceiros: [] };
 
-        console.log(`[Filtro Ano] Linhas após filtrar 2025: ${dadosFiltrados.length}`);
+        // 2. Turma real vem da primeira linha (independente de ano/status)
+        const turma = String(rowsAluno[0].get('Turma') || '').trim();
+        console.log(`[Turma] Turma real do aluno na planilha: ${turma}`);
 
-        dadosFiltrados = dadosFiltrados.filter(row => {
-            const status = String(row.get('STATUS PGTO') || '').toUpperCase();
-            return status === 'PAGO';
-        });
+        // 3. Filtrar por 2025 e PAGO para o PDF
+        const rowsFiltradas = rowsAluno
+            .filter(row => parsearMesAno(row.get('MêS PARCELA')).ano === 2025)
+            .filter(row => String(row.get('STATUS PGTO') || '').toUpperCase() === 'PAGO');
 
-        console.log(`[Filtro Status] Linhas após filtrar PAGO: ${dadosFiltrados.length}`);
+        console.log(`[Filtro 2025+PAGO] Parcelas encontradas: ${rowsFiltradas.length}`);
 
-        const dados = dadosFiltrados.map(row => {
+        const dadosFinanceiros = rowsFiltradas.map(row => {
             const { mes, ano } = parsearMesAno(row.get('MêS PARCELA'));
             return {
                 Nome: row.get(colunaNome),
@@ -456,7 +454,7 @@ async function buscarDadosFinanceiros(cpf = null, nome = null, email = null) {
             };
         });
 
-        return dados;
+        return { turma, dadosFinanceiros };
 
     } catch (error) {
         console.error('[Google Sheets] Erro ao buscar dados:', error.message);
@@ -496,54 +494,65 @@ async function gerarDeclaracao(dadosAluno) {
     try {
         console.log('[Geração] Iniciando para:', dadosAluno.nome);
 
-        // 1. Verificar turma
-        if (!verificarTurma(dadosAluno.turma)) {
-            console.log('[Turma] SEI detectada - enviar tutorial');
-            return {
-                success: true,
-                tipo: 'tutorial',
-                mensagem: 'Turma SEI - enviar tutorial escrito'
-            };
-        }
-
-        // 2. Buscar dados financeiros no Google Sheets
-        console.log('[Google Sheets] Buscando dados...');
-        const dadosFinanceiros = await buscarDadosFinanceiros(
+        // 1. Buscar turma real + dados financeiros em uma única chamada ao Sheets
+        console.log('[Google Sheets] Buscando dados do aluno...');
+        const { turma, dadosFinanceiros } = await buscarDadosAluno(
             dadosAluno.cpf,
             dadosAluno.nome,
             dadosAluno.email
         );
 
+        // 2. Aluno não encontrado na base
+        if (!turma) {
+            console.log('[Erro] Aluno não encontrado na base de dados');
+            return {
+                success: false,
+                erro: 'Aluno não encontrado na base de dados'
+            };
+        }
+
+        // 3. Verificar turma (SEI = 3, 4, 5... → tutorial; T1/T2 → PDF)
+        if (!verificarTurma(turma)) {
+            console.log(`[Turma] Turma SEI (${turma}) detectada - encaminhar tutorial`);
+            return {
+                success: true,
+                tipo: 'tutorial',
+                turma,
+                mensagem: 'Turma SEI - enviar tutorial escrito'
+            };
+        }
+
+        // 4. T1 ou T2 — verificar se há pagamentos em 2025
         if (dadosFinanceiros.length === 0) {
-            console.log('[Erro] Nenhum pagamento encontrado');
+            console.log('[Erro] Nenhum pagamento PAGO encontrado para 2025');
             return {
                 success: false,
                 erro: 'Nenhum pagamento encontrado para 2025'
             };
         }
 
-        console.log(`[Sucesso] ${dadosFinanceiros.length} parcelas encontradas`);
+        console.log(`[Sucesso] ${dadosFinanceiros.length} parcelas encontradas para turma ${turma}`);
 
-        // 3. Calcular total
+        // 5. Calcular total
         const valorTotal = calcularTotal(dadosFinanceiros);
         console.log(`[Total] R$ ${valorTotal.toFixed(2)}`);
 
-        // 4. Preparar dados das parcelas
+        // 6. Preparar dados das parcelas
         const dadosParcelas = prepararDadosParcelas(dadosFinanceiros);
 
-        // 5. Montar dados completos para o template HTML
+        // 7. Montar dados completos para o template HTML
         const dadosTemplate = {
             nome: dadosAluno.nome,
             cpf: formatarCPF(dadosAluno.cpf),
-            turma: dadosAluno.turma,
+            turma,
             total: formatarMoeda(valorTotal),
             ...dadosParcelas
         };
 
-        // 6. Gerar HTML
+        // 8. Gerar HTML
         const html = gerarHTMLDeclaracao(dadosTemplate);
 
-        // 7. Lançar Puppeteer
+        // 9. Lançar Puppeteer
         // Em produção (Vercel): usa @sparticuz/chromium
         // Local (Windows/Mac): usa Chrome/Chromium instalado
         console.log('[PDF] Iniciando Puppeteer...');
@@ -577,7 +586,7 @@ async function gerarDeclaracao(dadosAluno) {
             headless: true,
         });
 
-        // 8. Renderizar HTML e exportar como PDF
+        // 10. Renderizar HTML e exportar como PDF
         const page = await browser.newPage();
         await page.setContent(html, { waitUntil: 'networkidle0' });
         const pdfBuffer = await page.pdf({
@@ -623,9 +632,9 @@ module.exports = async (req, res) => {
 
     // GET - Health check OU geração de PDF via query params (para Blip)
     if (req.method === 'GET') {
-        const { nome, cpf, turma, email } = req.query || {};
+        const { nome, cpf, email } = req.query || {};
 
-        // Se não tiver cpf/nome/turma → health check
+        // Se não tiver cpf/nome → health check
         if (!cpf && !nome) {
             return res.status(200).json({
                 status: 'online',
@@ -636,11 +645,11 @@ module.exports = async (req, res) => {
             });
         }
 
-        // Com parâmetros → gera PDF (usado pelo Blip como URI do documento)
-        if (!nome || !cpf || !turma) {
+        // Com parâmetros → gera PDF (turma detectada automaticamente pela planilha)
+        if (!nome || !cpf) {
             return res.status(400).json({
                 success: false,
-                erro: 'Campos obrigatórios: nome, cpf, turma'
+                erro: 'Campos obrigatórios: nome, cpf'
             });
         }
 
@@ -649,12 +658,11 @@ module.exports = async (req, res) => {
             console.log('[Request GET] Blip/URL solicitação:', {
                 nome,
                 cpf: cpf.replace(/\d(?=\d{4})/g, '*'),
-                turma,
                 timestamp: new Date().toISOString()
             });
             console.log('========================================\n');
 
-            const resultado = await gerarDeclaracao({ nome, cpf, email, turma });
+            const resultado = await gerarDeclaracao({ nome, cpf, email });
 
             if (resultado.success && resultado.tipo === 'declaracao') {
                 res.setHeader('Content-Type', 'application/pdf');
@@ -678,12 +686,12 @@ module.exports = async (req, res) => {
     // POST - Gerar declaração
     if (req.method === 'POST') {
         try {
-            const { nome, cpf, email, turma } = req.body;
+            const { nome, cpf, email } = req.body;
 
-            if (!nome || !cpf || !turma) {
+            if (!nome || !cpf) {
                 return res.status(400).json({
                     success: false,
-                    erro: 'Campos obrigatórios: nome, cpf, turma'
+                    erro: 'Campos obrigatórios: nome, cpf'
                 });
             }
 
@@ -699,12 +707,11 @@ module.exports = async (req, res) => {
             console.log('[Request] Nova solicitação:', {
                 nome,
                 cpf: cpf.replace(/\d(?=\d{4})/g, '*'),
-                turma,
                 timestamp: new Date().toISOString()
             });
             console.log('========================================\n');
 
-            const resultado = await gerarDeclaracao({ nome, cpf, email, turma });
+            const resultado = await gerarDeclaracao({ nome, cpf, email });
 
             if (resultado.success && resultado.tipo === 'declaracao') {
                 // ?format=base64 → retorna JSON (para Blip e integrações similares)
