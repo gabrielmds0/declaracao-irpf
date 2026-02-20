@@ -9,6 +9,7 @@ const puppeteer = require('puppeteer-core');
 const chromium = require('@sparticuz/chromium');
 const { GoogleSpreadsheet } = require('google-spreadsheet');
 const { JWT } = require('google-auth-library');
+const nodemailer = require('nodemailer');
 const fs = require('fs');
 const path = require('path');
 
@@ -31,6 +32,61 @@ const IMG_WATERMARK  = carregarImagemBase64('watermark.png');
 const GOOGLE_SERVICE_ACCOUNT_EMAIL = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
 const GOOGLE_PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n');
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
+const GMAIL_USER = process.env.GMAIL_USER;
+const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD;
+
+// ==================== ENVIO DE EMAIL ====================
+
+async function enviarEmailComPDF({ emailDestinatario, nomeAluno, pdfBuffer, nomeArquivo, totalParcelas, valorTotal }) {
+    if (!GMAIL_USER || !GMAIL_APP_PASSWORD) {
+        console.warn('[Email] GMAIL_USER ou GMAIL_APP_PASSWORD não configurados — email não enviado');
+        return { enviado: false, motivo: 'Credenciais de email não configuradas' };
+    }
+
+    const transporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+            user: GMAIL_USER,
+            pass: GMAIL_APP_PASSWORD
+        }
+    });
+
+    const mailOptions = {
+        from: `"Liberdade Médica" <${GMAIL_USER}>`,
+        to: emailDestinatario,
+        subject: 'Declaração de Pagamentos para o IRPF 2025 — Liberdade Médica',
+        html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <h2 style="color: #1a1a2e;">Declaração IRPF 2025</h2>
+                <p>Olá, <strong>${nomeAluno}</strong>!</p>
+                <p>Segue em anexo sua <strong>Declaração de Pagamentos para o IRPF 2025</strong> referente ao curso de pós-graduação na <strong>Liberdade Médica</strong>.</p>
+                <ul>
+                    <li><strong>Parcelas pagas em 2025:</strong> ${totalParcelas}</li>
+                    <li><strong>Valor total:</strong> ${valorTotal}</li>
+                </ul>
+                <p>Este documento pode ser utilizado para dedução na sua Declaração de Imposto de Renda.</p>
+                <p style="color: #666; font-size: 12px; margin-top: 32px;">
+                    Liberdade Médica Ltda — CNPJ 40.070.030/0001-99<br>
+                    Em caso de dúvidas, entre em contato com nossa equipe.
+                </p>
+            </div>
+        `,
+        attachments: [{
+            filename: nomeArquivo,
+            content: pdfBuffer,
+            contentType: 'application/pdf'
+        }]
+    };
+
+    try {
+        const info = await transporter.sendMail(mailOptions);
+        console.log(`[Email] Enviado para ${emailDestinatario} — MessageId: ${info.messageId}`);
+        return { enviado: true, messageId: info.messageId };
+    } catch (error) {
+        console.error('[Email] Erro ao enviar:', error.message);
+        return { enviado: false, motivo: error.message };
+    }
+}
 
 // ==================== FUNÇÕES AUXILIARES ====================
 
@@ -597,14 +653,31 @@ async function gerarDeclaracao(dadosAluno) {
 
         console.log('[PDF] Documento gerado com sucesso');
 
+        const nomeArquivo = `Declaracao_IRPF_${dadosAluno.nome.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, '_')}_${Date.now()}.pdf`;
+        const emailAluno = dadosFinanceiros[0].Email;
+
+        // 11. Enviar PDF por email para o aluno
+        const emailResult = await enviarEmailComPDF({
+            emailDestinatario: emailAluno,
+            nomeAluno: dadosAluno.nome,
+            pdfBuffer,
+            nomeArquivo,
+            totalParcelas: dadosFinanceiros.length,
+            valorTotal: formatarMoeda(valorTotal)
+        });
+
         return {
             success: true,
             tipo: 'declaracao',
             buffer: pdfBuffer,
-            nomeArquivo: `Declaracao_IRPF_${dadosAluno.nome.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, '_')}_${Date.now()}.pdf`,
+            nomeArquivo,
             totalParcelas: dadosFinanceiros.length,
             valorTotal: formatarMoeda(valorTotal),
-            mensagem: 'Declaração PDF gerada com sucesso!'
+            emailEnviado: emailResult.enviado,
+            emailDestinatario: emailAluno,
+            mensagem: emailResult.enviado
+                ? `Declaração enviada para ${emailAluno}`
+                : `PDF gerado, mas email não enviado: ${emailResult.motivo}`
         };
 
     } catch (error) {
