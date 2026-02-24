@@ -12,7 +12,9 @@
     "google-auth-library": "^9.4.1",
     "google-spreadsheet": "^4.1.1",
     "nodemailer": "^8.0.1",
-    "puppeteer-core": "^24.37.5"
+    "pg": "^8.18.0",
+    "puppeteer-core": "^24.37.5",
+    "resend": "^6.9.2"
   },
   "engines": {
     "node": ">=18.x"

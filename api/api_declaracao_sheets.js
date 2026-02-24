@@ -10,8 +10,37 @@ const chromium = require('@sparticuz/chromium');
 const { GoogleSpreadsheet } = require('google-spreadsheet');
 const { JWT } = require('google-auth-library');
 const nodemailer = require('nodemailer');
+const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
+
+// ==================== BANCO DE DADOS ====================
+
+const dbPool = process.env.DATABASE_URL
+    ? new Pool({
+        connectionString: process.env.DATABASE_URL,
+        ssl: { rejectUnauthorized: false },
+        max: 2,
+        idleTimeoutMillis: 10000,
+        connectionTimeoutMillis: 5000,
+    })
+    : null;
+
+async function registrarLog({ nome, cpf, emailAluno, emailEnviadoPara, turma, totalParcelas, valorTotal, pdfGerado, emailEnviado, status, erro, emailErro }) {
+    if (!dbPool) return;
+    try {
+        const cpfMascarado = String(cpf).replace(/\D/g, '').replace(/(\d{3})\d{5}(\d{3})/, '$1*****$2');
+        await dbPool.query(
+            `INSERT INTO declaracao_logs
+                (nome, cpf_mascarado, email_aluno, email_enviado_para, turma, total_parcelas, valor_total, pdf_gerado, email_enviado, status, erro, email_erro)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+            [nome, cpfMascarado, emailAluno, emailEnviadoPara, turma, totalParcelas, valorTotal, pdfGerado, emailEnviado, status, erro, emailErro]
+        );
+        console.log('[DB] Log registrado com sucesso');
+    } catch (err) {
+        console.error('[DB] Erro ao registrar log:', err.message);
+    }
+}
 
 // Carrega imagens como base64 para embed inline no HTML (necessário no Vercel)
 function carregarImagemBase64(nomeArquivo) {
@@ -571,18 +600,22 @@ async function gerarDeclaracao(dadosAluno) {
             dadosAluno.email
         );
 
-        // 2. Aluno não encontrado na base
+        // 2. Aluno não encontrado na base → tratar como tutorial (mesmo fluxo que turma SEI)
         if (!turma) {
-            console.log('[Erro] Aluno não encontrado na base de dados');
+            console.log('[Turma] Aluno não encontrado na planilha — encaminhar tutorial');
+            await registrarLog({ nome: dadosAluno.nome, cpf: dadosAluno.cpf, status: 'tutorial', erro: 'Aluno não encontrado na base de dados' });
             return {
-                success: false,
-                erro: 'Aluno não encontrado na base de dados'
+                success: true,
+                tipo: 'tutorial',
+                turma: null,
+                mensagem: 'Aluno não encontrado na base de dados — enviar tutorial'
             };
         }
 
         // 3. Verificar turma (SEI = 3, 4, 5... → tutorial; T1/T2 → PDF)
         if (!verificarTurma(turma)) {
             console.log(`[Turma] Turma SEI (${turma}) detectada - encaminhar tutorial`);
+            await registrarLog({ nome: dadosAluno.nome, cpf: dadosAluno.cpf, turma, status: 'tutorial' });
             return {
                 success: true,
                 tipo: 'tutorial',
@@ -594,6 +627,7 @@ async function gerarDeclaracao(dadosAluno) {
         // 4. T1 ou T2 — verificar se há pagamentos em 2025
         if (dadosFinanceiros.length === 0) {
             console.log('[Erro] Nenhum pagamento PAGO encontrado para 2025');
+            await registrarLog({ nome: dadosAluno.nome, cpf: dadosAluno.cpf, turma, status: 'erro', erro: 'Nenhum pagamento encontrado para 2025' });
             return {
                 success: false,
                 erro: 'Nenhum pagamento encontrado para 2025'
@@ -666,7 +700,7 @@ async function gerarDeclaracao(dadosAluno) {
 
         console.log('[PDF] Documento gerado com sucesso');
 
-        const nomeArquivo = `Declaracao_IRPF_${dadosAluno.nome.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, '_')}_${Date.now()}.pdf`;
+        const nomeArquivo = `Declaracao_IRPF_${dadosAluno.nome.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\x00-\x7F]/g, '').replace(/\s+/g, '_')}_${Date.now()}.pdf`;
         const emailAluno = dadosFinanceiros[0].Email;
 
         // 11. Enviar PDF por email para o aluno
@@ -677,6 +711,21 @@ async function gerarDeclaracao(dadosAluno) {
             nomeArquivo,
             totalParcelas: dadosFinanceiros.length,
             valorTotal: formatarMoeda(valorTotal)
+        });
+
+        // 12. Registrar log no banco
+        await registrarLog({
+            nome: dadosAluno.nome,
+            cpf: dadosAluno.cpf,
+            emailAluno,
+            emailEnviadoPara: TEST_EMAIL || emailAluno,
+            turma,
+            totalParcelas: dadosFinanceiros.length,
+            valorTotal: formatarMoeda(valorTotal),
+            pdfGerado: true,
+            emailEnviado: emailResult.enviado,
+            status: 'sucesso',
+            emailErro: emailResult.enviado ? null : emailResult.motivo
         });
 
         return {
@@ -695,6 +744,7 @@ async function gerarDeclaracao(dadosAluno) {
 
     } catch (error) {
         console.error('[Erro] Erro ao gerar declaração:', error);
+        await registrarLog({ nome: dadosAluno.nome, cpf: dadosAluno.cpf, status: 'erro', erro: error.message });
         return {
             success: false,
             erro: error.message
@@ -757,7 +807,7 @@ module.exports = async (req, res) => {
                 res.statusCode = 200;
                 return res.end(resultado.buffer);
             } else {
-                return res.status(resultado.success ? 200 : 400).json(resultado);
+                return res.status(400).json(resultado);
             }
         } catch (error) {
             console.error('[Erro Fatal GET]', error);
@@ -824,7 +874,7 @@ module.exports = async (req, res) => {
                 return res.end(resultado.buffer);
             } else {
                 console.log('[Response] Retorno:', resultado);
-                return res.status(resultado.success ? 200 : 400).json(resultado);
+                return res.status(400).json(resultado);
             }
 
         } catch (error) {

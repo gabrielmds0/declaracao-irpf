@@ -3,8 +3,8 @@
   "name": "declaracao-irpf-api",
   "routes": [
     {
-      "src": "/api/(.*)",
-      "dest": "/api/$1"
+      "src": "/api/declaracao(.*)",
+      "dest": "/api/api_declaracao_sheets.js"
     },
     {
       "src": "/(.*)",
